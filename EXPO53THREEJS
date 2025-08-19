@@ -1,0 +1,172 @@
+critical
+Getting Three.js and its ecosystem to work with Expo SDK 53 can be challenging due to several significant breaking changes introduced in that version. The upgrade to React Native 0.79, the adoption of React 19, enabling the New Architecture by default, and stricter Metro bundler rules have created a perfect storm of compatibility issues.
+
+Here is a comprehensive, deeply researched guide with detailed workarounds to make Three.js, and specifically `@react-three/fiber`, function correctly in your Expo SDK 53 project.
+
+### The Core Problems Explained
+
+1.  **Dependency Version Mismatch (`expo-gl`)**: This is the most critical issue. Expo SDK 53 uses `expo-gl@~15.0.0`. However, versions of `@react-three/fiber` might have a dependency on an older version of `expo-gl`. This mismatch is a primary reason why 3D scenes render on the web but fail with a crash on native mobile devices.
+2.  **React 19 Incompatibility**: Expo SDK 53 includes preliminary support for React 19. The React Three Fiber library is version-specific: `@react-three/fiber@8` is built for React 18, while `@react-three/fiber@9` is required for React 19. Using the wrong version will cause your application to fail.
+3.  **New Architecture by Default**: Expo SDK 53 enables React Native's New Architecture (Fabric and TurboModules) by default. While all `expo-*` packages support it, many third-party libraries, including parts of the 3D ecosystem, may have subtle bugs or are not fully compatible, leading to crashes.
+4.  **Metro Bundler Stricter Rules**: Metro now enforces the `exports` field in `package.json` files, which can lead to module resolution errors or a "dual package hazard" with libraries that are not correctly configured for this modern standard.
+5.  **Texture Loading Bug in `@react-three/drei`**: A known issue in `@react-three/drei/native` related to an outdated `BlobManager` import prevents GLTF models from loading correctly on native, resulting in errors like `url.lastIndexOf is not a function`.
+
+---
+
+### Comprehensive Workaround: A Step-by-Step Guide
+
+Follow these steps carefully to configure your project for the highest chance of success.
+
+#### Step 1: Project Setup and Correct Dependency Installation
+
+It is highly recommended to start with a fresh project to avoid conflicts from a previous SDK version.
+
+1.  **Create a new Expo project:**
+    ```bash
+    npx create-expo-app@latest my-three-app
+    cd my-three-app
+    ```
+
+2.  **Install the core dependencies.** You must install the versions that are compatible with each other. Since Expo 53 uses React 19, you need `@react-three/fiber` v9.
+    ```bash
+    npx expo install expo-gl
+    npm install three @react-three/fiber@^9.0.0 @react-three/drei@^10.0.0
+    ```
+    *   `expo-gl`: The core library providing WebGL context. `npx expo install` ensures you get the version compatible with SDK 53.
+    *   `three`: The core Three.js library.
+    *   `@react-three/fiber@^9.0.0`: The essential React renderer for Three.js, version 9 is for React 19.
+    *   `@react-three/drei@^10.0.0`: A collection of useful helpers and abstractions for R3F.
+
+#### Step 2: Configure Metro for 3D Asset Bundling
+
+You need to tell the Metro bundler how to handle 3D model file types so they are included in your app bundle.
+
+1.  Create a `metro.config.js` file in the root of your project.
+2.  Add the following configuration. This extends Expo's default configuration and adds the necessary asset extensions.
+
+    ```javascript
+    const { getDefaultConfig } = require('expo/metro-config');
+
+    const config = getDefaultConfig(__dirname);
+
+    // Add support for 3D model files
+    config.resolver.assetExts.push(
+      'glb',
+      'gltf',
+      'png',
+      'jpg',
+      'obj',
+      'mtl'
+    );
+
+    module.exports = config;
+    ```
+    **Note:** There is a known issue in SDK 53 where even a correctly configured `metro.config.js` might show a warning. As long as you extend the default config as shown, you can proceed.
+
+#### Step 3: Write the Code with Native-Specific Imports
+
+When writing your components, it is crucial to use the native-specific entry points for `@react-three/fiber` and to work around the known bugs in `@react-three/drei`.
+
+1.  **Use `/native` Imports:** For mobile, you should import from `@react-three/fiber/native`. This ensures you are using the version tailored for the React Native environment.
+
+2.  **Workaround for `useGLTF`:** Due to the `BlobManager` bug, importing `useGLTF` from `@react-three/drei/native` will fail. The current effective workaround is to import it from the standard `@react-three/drei` entry point instead.
+
+Here is a sample `App.js` demonstrating a basic scene and loading a GLB model with the correct imports and workarounds:
+
+```javascript
+import React, { Suspense } from 'react';
+import { useWindowDimensions } from 'react-native';
+import { Canvas } from '@react-three/fiber/native'; // Use the /native import
+import { useGLTF, Environment } from '@react-three/drei'; // DO NOT use /native for useGLTF
+
+// A simple component to load and display a 3D model
+function Model(props) {
+  // Replace with the actual path to your model
+  const { scene } = useGLTF(require('./assets/my-model.glb'));
+  return <primitive object={scene} {...props} />;
+}
+
+export default function App() {
+  const { width, height } = useWindowDimensions();
+
+  return (
+    <Canvas
+      style={{ flex: 1 }}
+      gl={{ physicallyCorrectLights: true }} // Use legacy lights if you have issues
+      camera={{ position: [-6, 0, 16], fov: 36 }}
+      onCreated={(state) => {
+        const _gl = state.gl.getContext();
+        const pixelStorei = _gl.pixelStorei.bind(_gl);
+        _gl.pixelStorei = function (...args) {
+          const [parameter] = args;
+          switch (parameter) {
+            case _gl.UNPACK_FLIP_Y_WEBGL:
+              return pixelStorei(...args);
+          }
+        };
+      }}
+    >
+      <ambientLight intensity={1} />
+      <Suspense fallback={null}>
+        <Model />
+        <Environment preset="park" />
+      </Suspense>
+    </Canvas>
+  );
+}
+```
+
+#### Step 4: Mitigate Expo SDK 53's Breaking Changes
+
+If you still face crashes or unexpected behavior, especially on app startup, the issue likely lies with the New Architecture or Metro's `exports` enforcement.
+
+1.  **Temporarily Opt-Out of the New Architecture:** This is the most common fix for compatibility issues with third-party libraries. Edit your `app.json` to disable it.
+    ```json
+    {
+      "expo": {
+        "android": {
+          "newArchEnabled": false
+        },
+        "ios": {
+          "newArchEnabled": false
+        }
+      }
+    }
+    ```
+    This allows you to benefit from SDK 53 while giving libraries time to catch up.
+
+2.  **Temporarily Opt-Out of Metro's `exports` Enforcement:** If you encounter "module not found" errors, you can disable this feature in your `metro.config.js`.
+
+    ```javascript
+    const { getDefaultConfig } = require('expo/metro-config');
+    const config = getDefaultConfig(__dirname);
+
+    // ... other config like assetExts
+
+    // Add this line to disable exports enforcement
+    config.resolver.unstable_enablePackageExports = false;
+
+    module.exports = config;
+    ```
+    This reverts Metro to its older module resolution behavior and can fix issues with libraries that haven't updated their `package.json`.
+
+#### Step 5: Build and Test Correctly
+
+**Do not rely on Expo Go.** Due to the native dependencies of `expo-gl`, you must use a **development build** to test on a physical device.
+
+1.  **Install EAS CLI:**
+    ```bash
+    npm install -g eas-cli
+    ```
+2.  **Create a development build:**
+    ```bash
+    eas build --profile development --platform android
+    # or --platform ios
+    ```
+3.  Install the build on your physical device. Simulators and emulators may have inconsistent WebGL support, so a real device is strongly recommended.
+4.  **Start your development server:**
+    ```bash
+    npx expo start --dev-client
+    ```
+
+By following these detailed steps, you address the known version conflicts, configuration requirements, and specific bugs, providing a clear path to getting your Three.js project running successfully on Expo SDK 53.
