@@ -12,7 +12,7 @@ config.resolver.assetExts.push(
   'mtl'
 );
 
-// Temporarily disable exports enforcement if needed
-// config.resolver.unstable_enablePackageExports = false;
+// Disable package exports to fix import.meta error
+config.resolver.unstable_enablePackageExports = false;
 
 module.exports = config;

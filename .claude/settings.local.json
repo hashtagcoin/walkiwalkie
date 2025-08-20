@@ -11,7 +11,10 @@
       "WebSearch",
       "Bash(rm:*)",
       "Bash(mv:*)",
-      "Bash(del /f \"D:\\walkiewalkie\\app\\(tabs)\\*.tsx\")"
+      "Bash(del /f \"D:\\walkiewalkie\\app\\(tabs)\\*.tsx\")",
+      "Bash(npm ls:*)",
+      "Bash(npx expo start:*)",
+      "Bash(npm uninstall:*)"
     ],
     "deny": []
   }
